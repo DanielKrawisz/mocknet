@@ -1,23 +1,24 @@
 package mocknet
 
 import (
-	"net"
-	"time"
 	"errors"
+	"net"
+	"strconv"
+	"time"
 )
 
-// mocknet provides for mock objects for testing purposes. There is a mock 
-// net.Listener and a mock net.Conn. 
+// mocknet provides for mock objects for testing purposes. There is a mock
+// net.Listener and a mock net.Conn.
 
-// Functions that are intended to be used by the tester begin with Mock. 
+// Functions that are intended to be used by the tester begin with Mock.
 // For example, if you want the program being tested to read a new message,
-// the tester would call MockWrite, and then the program would call Read. 
+// the tester would call MockWrite, and then the program would call Read.
 
 // Listener implements the Listener interface and is used to mock
-// a listener for testing purposes. It 
+// a listener for testing purposes. It
 type Listener struct {
 	// A channel that the tester can use to send new connections to the listener.
-	incoming     chan net.Conn
+	incoming chan net.Conn
 	// A channel that is used to disconnect the listener.
 	disconnect   chan struct{}
 	localAddr    net.Addr
@@ -58,10 +59,41 @@ func (l *Listener) MockOpenConnection(conn net.Conn) {
 // NewListener returns a new listener.
 func NewListener(localAddr net.Addr, disconnected bool) *Listener {
 	return &Listener{
-		incoming:     make(chan net.Conn), 
+		incoming:     make(chan net.Conn),
 		disconnect:   make(chan struct{}),
 		localAddr:    localAddr,
-		disconnected: disconnected, 
+		disconnected: disconnected,
+	}
+}
+
+type ListenerBuilder struct {
+	localAddr net.Addr
+	listeners []*Listener
+}
+
+func (lb *ListenerBuilder) Listen(service, addr string) (net.Listener, error) {
+	if len(lb.listeners) == cap(lb.listeners) {
+		return nil, errors.New("mock listener builder has reached its capacity.")
+	}
+
+	listener := NewListener(lb.localAddr, false)
+
+	lb.listeners = append(lb.listeners, listener)
+	return listener, nil
+}
+
+func (lb *ListenerBuilder) GetListener(n int) *Listener {
+	if n < 0 || n >= len(lb.listeners) {
+		return nil
+	}
+
+	return lb.listeners[n]
+}
+
+func NewListenerBuilder(localAddr net.Addr, capacity int) *ListenerBuilder {
+	return &ListenerBuilder{
+		localAddr: localAddr,
+		listeners: make([]*Listener, 0, capacity),
 	}
 }
 
@@ -71,8 +103,8 @@ type Conn struct {
 	sendChan    chan []byte
 	receiveChan chan []byte
 	done        chan struct{} // A channel to close the connection.
-	outMessage  []byte // A message ready to be sent back to the real peer.
-	outPlace    int    //How much of the outMessage that has been sent.
+	outMessage  []byte        // A message ready to be sent back to the real peer.
+	outPlace    int           //How much of the outMessage that has been sent.
 	localAddr   net.Addr
 	remoteAddr  net.Addr
 	closed      bool
@@ -182,5 +214,18 @@ func NewConn(localAddr, remoteAddr net.Addr, closed bool) *Conn {
 		receiveChan: make(chan []byte),
 		done:        make(chan struct{}),
 		closed:      closed,
+	}
+}
+
+// Dialer is a function that returns a function with the same type as
+// net.Dial but which returns a mock connection.
+func Dialer(localAddr net.Addr, fail bool, closed bool) func(service, addr string) (net.Conn, error) {
+	return func(service, addr string) (net.Conn, error) {
+		if fail {
+			return nil, errors.New("Connection failed.")
+		}
+		host, portstr, _ := net.SplitHostPort(addr)
+		port, _ := strconv.ParseInt(portstr, 10, 0)
+		return NewConn(localAddr, &net.TCPAddr{IP: net.ParseIP(host), Port: int(port)}, closed), nil
 	}
 }
