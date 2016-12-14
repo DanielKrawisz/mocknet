@@ -42,7 +42,7 @@ func (l *Listener) Accept() (net.Conn, error) {
 // Close closes the listener.
 // Any blocked Accept operations will be unblocked and return errors.
 func (l *Listener) Close() error {
-	l.disconnect <- struct{}{}
+	close(l.disconnect)
 	return nil
 }
 
